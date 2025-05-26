@@ -1,0 +1,164 @@
+// Initialize dataLayer
+window.dataLayer = window.dataLayer || [];
+
+// Define OptanonWrapper if needed by OneTrust
+function OptanonWrapper() {}
+
+// Immediately Invoked Function Expression (IIFE) to avoid polluting the global scope
+(function(w, d, s, i) {
+  let baseUrl;
+  let isProduction;
+  let isEUCountry = false;
+  let country = 'US';
+  let referer = '';
+  let isCookieConsentRequired = false;
+  let bannerInjected = false; // Flag to prevent multiple injections
+
+  // Utility function to add event listeners
+  const addEvent = (event, elem, func, options) => {
+    if (elem.addEventListener) {
+      elem.addEventListener(event, func, options);
+    } else if (elem.attachEvent) {
+      elem.attachEvent(`on${event}`, func);
+    } else {
+      elem[`on${event}`] = func;
+    }
+  };
+
+  // Function to create the cookie consent banner
+  const createCookieBanner = () => {
+    if (bannerInjected) return; // Prevent multiple injections
+    bannerInjected = true;
+
+    if (!isCookieConsentRequired) {
+      dataLayer.push({
+        event: 'OneTrustLoaded',
+        OnetrustActiveGroups: ',C0001,C0002,C0004,',
+      });
+      return;
+    }
+
+    const firstScript = d.getElementsByTagName(s)[0];
+    const script = d.createElement(s);
+    script.async = true;
+    script.setAttribute('data-document-language', 'true');
+    script.setAttribute(
+      'data-domain-script',
+      `094973b2-3748-4a7a-b5b7-d90c7a936ef1${isProduction ? '' : '-test'}`
+    );
+    script.src = 'https://cdn.cookielaw.org/scripttemplates/otSDKStub.js';
+    firstScript.parentNode.insertBefore(script, firstScript);
+  };
+
+  // Function to load Google Tag Manager
+  const loadTagManager = () => {
+    dataLayer.push({ 'gtm.start': Date.now(), event: 'gtm.js' });
+    const firstScript = d.getElementsByTagName(s)[0];
+    const script = d.createElement(s);
+    script.async = true;
+    script.src = `https://www.googletagmanager.com/gtm.js?id=${i}`;
+    firstScript.parentNode.insertBefore(script, firstScript);
+  };
+
+  // Function to fetch tag manager layers
+  const fetchLayers = async () => {
+    try {
+      const response = await fetch(`${baseUrl}/api/v1/tag-manager/layers`, {
+        credentials: 'include',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'X-Original-Referer': referer,
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data && typeof data === 'object') {
+          dataLayer.push(data);
+          w.tagmanagerLayerData = data;
+        }
+      } else {
+        console.error('Failed to fetch tag manager layers:', response.statusText);
+      }
+    } catch (error) {
+      console.error('Error fetching tag manager layers:', error);
+    } finally {
+      // Instead of immediately creating the cookie banner, set up the delayed injection
+      setupCookieBannerInjection();
+      loadTagManager();
+    }
+  };
+
+  // Function to set up the delayed injection of the cookie banner based on user interaction
+  const setupCookieBannerInjection = () => {
+    // Define the events to listen for user interaction
+    const userEvents = ['scroll', 'click', 'keydown', 'touchstart', 'mousemove', 'focus'];
+
+    // Handler to inject the cookie banner
+    const injectCookieBanner = (event) => {
+      createCookieBanner();
+      removeUserInteractionListeners();
+    };
+
+    // Function to remove all user interaction event listeners
+    const removeUserInteractionListeners = () => {
+      userEvents.forEach(event => {
+        window.removeEventListener(event, injectCookieBanner, { passive: true });
+      });
+    };
+
+    // Add event listeners for all specified user events
+    userEvents.forEach(event => {
+      addEvent(event, w, injectCookieBanner, { passive: true });
+    });
+
+    // Initial check in case the page is already scrolled upon load
+    if (w.scrollY > 0) {
+      createCookieBanner();
+      removeUserInteractionListeners();
+    }
+  };
+
+  // Function to fetch initial layers after pixel request
+  const handlePixelRequest = async () => {
+    await fetchLayers();
+  };
+
+  // Function to fetch necessary data from the global Nuxt state
+  const initializeData = () => {
+    const pinia = w.__NUXT__?.pinia;
+    if (pinia && typeof pinia === 'object') {
+      isEUCountry = pinia['app-store']?.cfIsEUCountry === true;
+      country = pinia['app-store']?.cfCountry || 'US';
+      referer = pinia['app-store']?.referer || d.referrer || '';
+    }
+
+    isCookieConsentRequired = isEUCountry || ['CH', 'GB'].includes(country);
+  };
+
+  // Event listener for window load
+  addEvent('load', w, async () => {
+    baseUrl = w.__NUXT__?.config?.public?.baseURL || '';
+    isProduction = w.__NUXT__?.config?.public?.environmentName === 'production';
+
+    initializeData();
+
+    try {
+      const pixelResponse = await fetch(`${baseUrl}/sf/jlst`, {
+        credentials: 'include',
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      });
+      if (pixelResponse.ok) {
+        await handlePixelRequest();
+      } else {
+        console.error('Failed to fetch pixel data:', pixelResponse.statusText);
+        await handlePixelRequest();
+      }
+    } catch (error) {
+      console.error('Error fetching pixel data:', error);
+      await handlePixelRequest();
+    }
+  });
+})(window, document, 'script', 'GTM-N3JWH8');
